@@ -14,12 +14,14 @@ import com.fintech.usermanagement.response.LoginResponse;
 import com.fintech.usermanagement.util.HttpService;
 import com.google.gson.Gson;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpHeaders;
 import org.springframework.stereotype.Service;
 
 import java.util.AbstractCollection;
 import java.util.Objects;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class CustomerServiceImpl implements CustomerService {
@@ -32,47 +34,56 @@ public class CustomerServiceImpl implements CustomerService {
 
     @Override
     public BaseResponse<CustomerOnboardingResponse> customerOnboarding(CustomerOnboardingRequest onboardingRequest, Channel channel) {
-        BaseResponse<?> baseResponse = new BaseResponse<>();
+        // Check if customer exists
         Customer customer = customerRepository.getCustomerByEmail(onboardingRequest.getEmail()).orElse(null);
-        if (!Objects.equals(customer, null)) {
+        if (customer != null) {
             return BaseResponse.<CustomerOnboardingResponse>builder()
                     .code("02")
                     .message("Customer already Exist")
                     .flag(false)
                     .build();
         }
+
+        // Create and save the new customer first
         customer = new Customer();
         customer.setEmail(onboardingRequest.getEmail());
         customer.setBvn(onboardingRequest.getBvn());
         customer.setNin(onboardingRequest.getNin());
         customer.setAddress(onboardingRequest.getAddress());
-        customer.setNin(onboardingRequest.getNin());
-        customer.setBvn(onboardingRequest.getBvn());
+
+        // Set channel flags
         switch (channel) {
-            case MOBILE ->
-                customer.setIsMobileUser(true);
-            case USSD ->
-                customer.setIsUssdUser(true);
-            case WEB ->
-                customer.setIsWebUser(true);
+            case MOBILE -> customer.setIsMobileUser(true);
+            case USSD -> customer.setIsUssdUser(true);
+            case WEB -> customer.setIsWebUser(true);
         }
 
-        String accountCreationUrl = "";
-        String response = httpService.get(new HttpHeaders(), accountCreationUrl).getBody();
-        baseResponse = gson.fromJson(response, BaseResponse.class);
-        if (!Objects.equals(baseResponse.getResult(), null)) {
-            Account account = accountRepository.findByEmail(onboardingRequest.getEmail()).orElse(null);
-            if (Objects.equals(account, null)) {
-                account = new Account();
-                account.setAccountName(onboardingRequest.getFirstName()+" "+onboardingRequest.getLastName());
+        // Save the customer first!
+        customer = customerRepository.save(customer);
+
+        log.info("Initiate Account Creation");
+        String accountCreationUrl = "http://localhost:8091/api/account/create";
+        HttpHeaders headers = new HttpHeaders();
+        headers.set("X-API-KEY", "secure-key-12345");
+
+        try {
+            String response = httpService.get(headers, accountCreationUrl).getBody();
+            BaseResponse<?> baseResponse = gson.fromJson(response, BaseResponse.class);
+
+            if (baseResponse.getResult() != null) {
+                // Create and save the account
+                Account account = new Account();
+                account.setAccountName(onboardingRequest.getFirstName() + " " + onboardingRequest.getLastName());
                 account.setAccountNo(baseResponse.getResult().toString());
-                account.setCustomer(customer);
+                account.setCustomer(customer);  // Now customer is persisted
                 account.setNuban(baseResponse.getResult().toString());
-                account.setProductName("101");
+                account.setProductCode("101");  // Fixed typo from ProductName to ProductCode
                 account.setProductName("INDIVIDUAL");
                 account.setAvailableBalanceStr("3000000");
                 account.setTier(3);
+
                 accountRepository.save(account);
+
                 return BaseResponse.<CustomerOnboardingResponse>builder()
                         .code("00")
                         .flag(true)
@@ -83,14 +94,15 @@ public class CustomerServiceImpl implements CustomerService {
                                 .accountTier("3")
                                 .build())
                         .build();
-
             }
+        } catch (Exception e) {
+            log.error("Account creation failed", e);
         }
+
         return BaseResponse.<CustomerOnboardingResponse>builder()
                 .code("02")
-                .flag(true)
+                .flag(false)  // Changed from true to false for error case
                 .message("Account Can't Be Created at the moment")
-                .result(null)
                 .build();
     }
 
