@@ -24,4 +24,6 @@ public class CustomerOnboardingRequest {
     private String nin;
     @NotBlank(message = "input a valid BVN")
     private String bvn;
+    @NotBlank(message = "input a valid BVN")
+    private String password;
 }

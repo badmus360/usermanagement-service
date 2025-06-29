@@ -1,11 +1,11 @@
 package com.fintech.usermanagement.service;
 
-import com.fintech.usermanagement.repository.CustomerRepository;
 import com.fintech.usermanagement.entity.Account;
 import com.fintech.usermanagement.entity.Customer;
 import com.fintech.usermanagement.enums.Channel;
 import com.fintech.usermanagement.jwt.JwtUtils;
 import com.fintech.usermanagement.repository.AccountRepository;
+import com.fintech.usermanagement.repository.CustomerRepository;
 import com.fintech.usermanagement.request.CustomerLoginRequest;
 import com.fintech.usermanagement.request.CustomerOnboardingRequest;
 import com.fintech.usermanagement.response.BaseResponse;
@@ -18,7 +18,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpHeaders;
 import org.springframework.stereotype.Service;
 
-import java.util.AbstractCollection;
 import java.util.Objects;
 
 @Slf4j
@@ -50,6 +49,7 @@ public class CustomerServiceImpl implements CustomerService {
         customer.setBvn(onboardingRequest.getBvn());
         customer.setNin(onboardingRequest.getNin());
         customer.setAddress(onboardingRequest.getAddress());
+        customer.setPassword(onboardingRequest.getPassword());
 
         // Set channel flags
         switch (channel) {
@@ -108,6 +108,7 @@ public class CustomerServiceImpl implements CustomerService {
 
     @Override
     public BaseResponse<LoginResponse> customerLogin(CustomerLoginRequest loginRequest) {
+        log.info("Fetch Customer by Email");
         Customer customer = customerRepository.getCustomerByEmail(loginRequest.getEmail()).orElse(null);
         if (Objects.equals(customer, null)) {
             return BaseResponse.<LoginResponse>builder()

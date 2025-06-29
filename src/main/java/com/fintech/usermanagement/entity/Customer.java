@@ -29,6 +29,7 @@ public class Customer {
     private Boolean isMobileUser;
     private Boolean isWebUser;
     private Boolean isUssdUser;
+    private String password;
     @CreationTimestamp
     private LocalDateTime createdAt;
     @UpdateTimestamp
