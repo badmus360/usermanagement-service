@@ -8,9 +8,8 @@ import com.fintech.usermanagement.repository.AccountRepository;
 import com.fintech.usermanagement.repository.CustomerRepository;
 import com.fintech.usermanagement.request.CustomerLoginRequest;
 import com.fintech.usermanagement.request.CustomerOnboardingRequest;
-import com.fintech.usermanagement.response.BaseResponse;
-import com.fintech.usermanagement.response.CustomerOnboardingResponse;
-import com.fintech.usermanagement.response.LoginResponse;
+import com.fintech.usermanagement.request.VerificationRequest;
+import com.fintech.usermanagement.response.*;
 import com.fintech.usermanagement.util.HttpService;
 import com.google.gson.Gson;
 import lombok.RequiredArgsConstructor;
@@ -18,6 +17,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpHeaders;
 import org.springframework.stereotype.Service;
 
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Objects;
 
 @Slf4j
@@ -33,76 +34,154 @@ public class CustomerServiceImpl implements CustomerService {
 
     @Override
     public BaseResponse<CustomerOnboardingResponse> customerOnboarding(CustomerOnboardingRequest onboardingRequest, Channel channel) {
-        // Check if customer exists
-        Customer customer = customerRepository.getCustomerByEmail(onboardingRequest.getEmail()).orElse(null);
-        if (customer != null) {
-            return BaseResponse.<CustomerOnboardingResponse>builder()
-                    .code("02")
-                    .message("Customer already Exist")
-                    .flag(false)
-                    .build();
+        try {
+            Customer customerResponse = customerRepository.getCustomerByEmail(onboardingRequest.getEmail()).orElse(null);
+            if (customerResponse != null) {
+                return BaseResponse.<CustomerOnboardingResponse>builder()
+                        .code("02")
+                        .message("Customer already Exist")
+                        .flag(false)
+                        .build();
+            }
+
+            BvnResponse bvnResponse = verifyBvn(onboardingRequest);
+            if (bvnResponse == null || !"200".equals(bvnResponse.getStatusCode())) {
+                return buildErrorResponse("02", bvnResponse != null ? bvnResponse.getMessage() : "BVN verification failed");
+            }
+
+            if (!onboardingRequest.getPhoneNumber().equals(bvnResponse.getResult().getPersonalInfo().getPhoneNumber())) {
+                return buildErrorResponse("02", "Phone number does not match BVN record");
+            }
+
+            NinResponse ninResponse = verifyNin(onboardingRequest);
+            log.info("NinResponse :: {}", gson.toJson(ninResponse));
+            if (ninResponse == null || !"200".equals(ninResponse.getStatusCode())) {
+                return buildErrorResponse("02", ninResponse != null ? ninResponse.getMessage() : "NIN verification failed");
+            }
+
+            if (!onboardingRequest.getPhoneNumber().equals(ninResponse.getResult().getPersonalInfo().getPhoneNumber())) {
+                return buildErrorResponse("02", "Phone number does not match NIN record");
+            }
+
+            BaseResponse<?> accountResponse = createAccount();
+            if (accountResponse == null || !"00".equals(accountResponse.getCode())) {
+                return buildErrorResponse("02", "Account creation failed");
+            }
+
+            Customer customer = createCustomer(onboardingRequest, channel);
+            customer = customerRepository.save(customer);
+
+            Account account = createAccountEntity(onboardingRequest, accountResponse, customer);
+            accountRepository.save(account);
+
+            return buildSuccessResponse(account);
+
+        } catch (Exception e) {
+            log.error("Customer onboarding failed: {}", e.getMessage(), e);
+            return buildErrorResponse("06", "System error during onboarding");
         }
+    }
 
-        // Create and save the new customer first
-        customer = new Customer();
-        customer.setEmail(onboardingRequest.getEmail());
-        customer.setBvn(onboardingRequest.getBvn());
-        customer.setNin(onboardingRequest.getNin());
-        customer.setAddress(onboardingRequest.getAddress());
-        customer.setPassword(onboardingRequest.getPassword());
+    private BvnResponse verifyBvn(CustomerOnboardingRequest request) {
+        HttpHeaders headers = createHeaders();
+        String bvnUrl = "http://localhost:8096/api/identity/bvn";
+        log.info("Initiating BVN verification");
+        VerificationRequest verificationRequest = new VerificationRequest();
+        verificationRequest.setNumber(request.getBvn());
 
-        // Set channel flags
+        try {
+            String response = httpService.post(verificationRequest, headers, bvnUrl).getBody();
+            return gson.fromJson(response, BvnResponse.class);
+        } catch (Exception e) {
+            log.error("BVN verification failed: {}", e.getMessage());
+            return null;
+        }
+    }
+
+    private NinResponse verifyNin(CustomerOnboardingRequest request) {
+        HttpHeaders headers = createHeaders();
+        String ninUrl = "http://localhost:8096/api/identity/nin";
+        log.info("Initiating NIN verification");
+        VerificationRequest verificationRequest = new VerificationRequest();
+        verificationRequest.setNumber(request.getNin());
+
+        try {
+            String response = httpService.post(verificationRequest, headers, ninUrl).getBody();
+            return gson.fromJson(response, NinResponse.class);
+        } catch (Exception e) {
+            log.error("NIN verification failed: {}", e.getMessage());
+            return null;
+        }
+    }
+
+    private BaseResponse<?> createAccount() {
+        HttpHeaders headers = createHeaders();
+        String accountUrl = "http://localhost:8091/api/account/create";
+        log.info("Initiating account creation");
+
+        try {
+            String response = httpService.get(headers, accountUrl).getBody();
+            return gson.fromJson(response, BaseResponse.class);
+        } catch (Exception e) {
+            log.error("Account creation failed: {}", e.getMessage());
+            return null;
+        }
+    }
+
+    private Customer createCustomer(CustomerOnboardingRequest request, Channel channel) {
+        Customer customer = new Customer();
+        customer.setEmail(request.getEmail());
+        customer.setBvn(request.getBvn());
+        customer.setNin(request.getNin());
+        customer.setAddress(request.getAddress());
+        customer.setPassword(request.getPassword());
+
         switch (channel) {
             case MOBILE -> customer.setIsMobileUser(true);
             case USSD -> customer.setIsUssdUser(true);
             case WEB -> customer.setIsWebUser(true);
         }
 
-        // Save the customer first!
-        customer = customerRepository.save(customer);
+        return customer;
+    }
 
-        log.info("Initiate Account Creation");
-        String accountCreationUrl = "http://localhost:8091/api/account/create";
+    private Account createAccountEntity(CustomerOnboardingRequest request, BaseResponse<?> response, Customer customer) {
+        Account account = new Account();
+        account.setAccountName(request.getFirstName() + " " + request.getLastName());
+        account.setAccountNo(response.getResult().toString());
+        account.setCustomer(customer);
+        account.setNuban(response.getResult().toString());
+        account.setProductCode("101");
+        account.setProductName("INDIVIDUAL");
+        account.setAvailableBalanceStr("3000000");
+        account.setTier(3);
+        return account;
+    }
+
+    private HttpHeaders createHeaders() {
         HttpHeaders headers = new HttpHeaders();
         headers.set("X-API-KEY", "secure-key-12345");
+        return headers;
+    }
 
-        try {
-            String response = httpService.get(headers, accountCreationUrl).getBody();
-            BaseResponse<?> baseResponse = gson.fromJson(response, BaseResponse.class);
+    private <T> BaseResponse<T> buildErrorResponse(String code, String message) {
+        return BaseResponse.<T>builder()
+                .code(code)
+                .message(message)
+                .flag(false)
+                .build();
+    }
 
-            if (baseResponse.getResult() != null) {
-                // Create and save the account
-                Account account = new Account();
-                account.setAccountName(onboardingRequest.getFirstName() + " " + onboardingRequest.getLastName());
-                account.setAccountNo(baseResponse.getResult().toString());
-                account.setCustomer(customer);  // Now customer is persisted
-                account.setNuban(baseResponse.getResult().toString());
-                account.setProductCode("101");  // Fixed typo from ProductName to ProductCode
-                account.setProductName("INDIVIDUAL");
-                account.setAvailableBalanceStr("3000000");
-                account.setTier(3);
-
-                accountRepository.save(account);
-
-                return BaseResponse.<CustomerOnboardingResponse>builder()
-                        .code("00")
-                        .flag(true)
-                        .message("Account Created Successfully")
-                        .result(CustomerOnboardingResponse.builder()
-                                .accountName(account.getAccountName())
-                                .accountNumber(account.getAccountNo())
-                                .accountTier("3")
-                                .build())
-                        .build();
-            }
-        } catch (Exception e) {
-            log.error("Account creation failed", e);
-        }
-
+    private BaseResponse<CustomerOnboardingResponse> buildSuccessResponse(Account account) {
         return BaseResponse.<CustomerOnboardingResponse>builder()
-                .code("02")
-                .flag(false)  // Changed from true to false for error case
-                .message("Account Can't Be Created at the moment")
+                .code("00")
+                .flag(true)
+                .message("Account created successfully")
+                .result(CustomerOnboardingResponse.builder()
+                        .accountName(account.getAccountName())
+                        .accountNumber(account.getAccountNo())
+                        .accountTier("3")
+                        .build())
                 .build();
     }
 

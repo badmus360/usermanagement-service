@@ -27,10 +27,10 @@ public class SwaggerConfig {
         License mitLicense = new License().name("MIT License").url("https://choosealicense.com/licenses/mit/");
 
         Info info = new Info()
-                .title("Bank9ja WEB API")
+                .title("User Management API")
                 .version("2.0")
                 .contact(contact)
-                .description("This API exposes endpoints for Bank9ja WEB.")
+                .description("This API exposes User Management API")
                 .termsOfService("https://www.9psb.com.ng/terms")
                 .license(mitLicense);
 

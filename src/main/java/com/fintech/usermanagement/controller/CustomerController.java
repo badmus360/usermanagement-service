@@ -21,7 +21,7 @@ public class CustomerController {
 
     private final CustomerService customerService;
 
-    @PostMapping(path = "/onboard/{channel}", consumes = "application/json")
+    @PostMapping("/onboard/{channel}")
     public ResponseEntity<BaseResponse<CustomerOnboardingResponse>> customerOnboarding(
             @RequestBody @Valid CustomerOnboardingRequest request,
             @PathVariable Channel channel
