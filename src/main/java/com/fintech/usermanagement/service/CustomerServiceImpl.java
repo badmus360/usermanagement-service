@@ -17,8 +17,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpHeaders;
 import org.springframework.stereotype.Service;
 
-import java.util.HashMap;
-import java.util.Map;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Objects;
 
 @Slf4j
@@ -35,6 +35,43 @@ public class CustomerServiceImpl implements CustomerService {
     @Override
     public BaseResponse<CustomerOnboardingResponse> customerOnboarding(CustomerOnboardingRequest onboardingRequest, Channel channel) {
         try {
+
+            if (onboardingRequest == null) {
+                return buildErrorResponse("01", "Request payload cannot be null");
+            }
+
+            List<String> missingFields = new ArrayList<>();
+            if (onboardingRequest.getEmail() == null || onboardingRequest.getEmail().isBlank()) missingFields.add("email");
+            if (onboardingRequest.getFirstName() == null || onboardingRequest.getFirstName().isBlank()) missingFields.add("firstName");
+            if (onboardingRequest.getMiddleName() == null || onboardingRequest.getMiddleName().isBlank()) missingFields.add("middleName");
+            if (onboardingRequest.getLastName() == null || onboardingRequest.getLastName().isBlank()) missingFields.add("lastName");
+            if (onboardingRequest.getAddress() == null || onboardingRequest.getAddress().isBlank()) missingFields.add("address");
+            if (onboardingRequest.getPhoneNumber() == null || onboardingRequest.getPhoneNumber().isBlank()) missingFields.add("phoneNumber");
+            if (onboardingRequest.getNin() == null || onboardingRequest.getNin().isBlank()) missingFields.add("NIN");
+            if (onboardingRequest.getBvn() == null || onboardingRequest.getBvn().isBlank()) missingFields.add("BVN");
+            if (onboardingRequest.getPassword() == null || onboardingRequest.getPassword().isBlank()) missingFields.add("password");
+
+            if (!missingFields.isEmpty()) {
+                return buildErrorResponse("01", "Missing required fields: " + String.join(", ", missingFields));
+            }
+
+            // Validate field formats
+            if (!onboardingRequest.getEmail().matches("^[A-Za-z0-9+_.-]+@(.+)$")) {
+                return buildErrorResponse("01", "Invalid email format");
+            }
+
+            if (!onboardingRequest.getPhoneNumber().matches("^[0-9]{11}$")) {
+                return buildErrorResponse("01", "Phone number must be 11 digits");
+            }
+
+            if (!onboardingRequest.getNin().matches("^[0-9]{11}$")) {
+                return buildErrorResponse("01", "NIN must be 11 digits");
+            }
+
+            if (!onboardingRequest.getBvn().matches("^[0-9]{11}$")) {
+                return buildErrorResponse("01", "BVN must be 11 digits");
+            }
+
             Customer customerResponse = customerRepository.getCustomerByEmail(onboardingRequest.getEmail()).orElse(null);
             if (customerResponse != null) {
                 return BaseResponse.<CustomerOnboardingResponse>builder()
@@ -189,10 +226,18 @@ public class CustomerServiceImpl implements CustomerService {
     public BaseResponse<LoginResponse> customerLogin(CustomerLoginRequest loginRequest) {
         log.info("Fetch Customer by Email");
         Customer customer = customerRepository.getCustomerByEmail(loginRequest.getEmail()).orElse(null);
+
         if (Objects.equals(customer, null)) {
             return BaseResponse.<LoginResponse>builder()
                     .code("02")
                     .message("Customer does not Exist")
+                    .flag(false)
+                    .build();
+        }
+        if (!Objects.equals(loginRequest.getPassword(), customer.getPassword())) {
+            return BaseResponse.<LoginResponse>builder()
+                    .code("02")
+                    .message("Incorrect Password")
                     .flag(false)
                     .build();
         }
