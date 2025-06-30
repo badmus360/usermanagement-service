@@ -153,7 +153,7 @@ public class CustomerServiceImpl implements CustomerService {
 
     private BaseResponse<?> createAccount() {
         HttpHeaders headers = createHeaders();
-        String accountUrl = "http://localhost:8091/api/account/create";
+        String accountUrl = "http://localhost:8091/api/transfer/account";
         log.info("Initiating account creation");
 
         try {
